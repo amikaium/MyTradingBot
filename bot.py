@@ -11,10 +11,9 @@ API_KEY = 'XAQj4j52q11U0cGBY1UTSta8SOAFAiBefCQeEpNVp0MqRgUElKkbqC87h1PFsbuc'
 API_SECRET = 'Fplq9Q5MlHZ6CID31zNhUWZICiA8mumyrqu1dmdshOCZmOJFtXuimVMf2R2xVJVn'
 BASE_URL = 'https://fapi.binance.com'
 
-# একাধিক কয়েন স্ক্যান করবে
 SYMBOLS = ['XRPUSDT', 'DOGEUSDT', 'TRXUSDT', 'ADAUSDT', 'MATICUSDT', 'LINKUSDT'] 
 TAKE_PROFIT_USDT = 0.30  
-TRADE_AMOUNT_USDT = 6.0 # ছোট সাইজ, যাতে আপনার ব্যালেন্সে অনেকগুলো ট্রেড ধরতে পারে
+TRADE_AMOUNT_USDT = 6.0 
 
 app = Flask(__name__)
 
@@ -35,24 +34,34 @@ def get_live_price(symbol):
     try: return float(requests.get(f"{BASE_URL}/fapi/v1/ticker/price?symbol={symbol}").json()['price'])
     except: return 0.0
 
-# 🧠 স্মার্ট অ্যালগরিদম (RSI ক্যালকুলেশন)
-def get_rsi(symbol):
+# 🧠 অ্যাডভান্সড প্রাইস অ্যাকশন ও RSI অ্যালগরিদম (Reversal Strategy)
+def get_market_trend(symbol):
     try:
-        klines = requests.get(f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval=5m&limit=14").json()
+        # ১৫ মিনিটের ক্যান্ডেলস্টিক ডেটা নিবে (বেশি একুরেট)
+        klines = requests.get(f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval=15m&limit=15").json()
+        
+        # RSI ক্যালকুলেশন
         gains, losses = 0, 0
-        for i in range(1, len(klines)):
+        for i in range(1, 14):
             change = float(klines[i][4]) - float(klines[i-1][4])
             if change > 0: gains += change
             else: losses -= change
-        if losses == 0: return 100
-        rs = gains / losses
-        return 100 - (100 / (1 + rs))
-    except: return 50
+        rs = gains / losses if losses > 0 else 100
+        rsi = 100 - (100 / (1 + rs))
+        
+        # রিভার্সাল কনফার্মেশন (শেষ ক্লোজ হওয়া ক্যান্ডেল কি সবুজ না লাল?)
+        last_open = float(klines[13][1])
+        last_close = float(klines[13][4])
+        is_green_candle = last_close > last_open # মার্কেট ঘুরে ওপরের দিকে উঠছে
+        is_red_candle = last_close < last_open # মার্কেট ঘুরে নিচের দিকে নামছে
+        
+        return rsi, is_green_candle, is_red_candle
+    except: return 50, False, False
 
 active_trades = {} 
 
 def auto_trading_loop():
-    print("🚀 Smart AI Auto-Trading Engine Started...")
+    print("🚀 Pro AI Reversal Engine Started...")
     while True:
         try:
             acc_info = binance_request('GET', '/fapi/v2/account')
@@ -83,22 +92,24 @@ def auto_trading_loop():
                         })
                         
                         if net_profit >= TAKE_PROFIT_USDT:
-                            print(f"💰 {sym} প্রফিট হিট! ক্লোজ করা হচ্ছে...")
+                            print(f"💰 {sym} প্রফিট হিট! ফি বাদে রিয়েল লাভ: {net_profit} USDT.")
                             # binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL' if amt > 0 else 'BUY', 'type': 'MARKET', 'quantity': abs(amt)})
                             
-                    # নতুন ট্রেড ধরার অ্যালগরিদম
                     elif free_bal > TRADE_AMOUNT_USDT:
-                        rsi = get_rsi(sym)
+                        rsi, is_green, is_red = get_market_trend(sym)
                         price = get_live_price(sym)
+                        
                         if price > 0:
                             qty = round(TRADE_AMOUNT_USDT / price, 1)
-                            # RSI ৩০ এর নিচে গেলে LONG (মার্কেট ওভারসোল্ড)
-                            if rsi < 35:
-                                print(f"🧠 {sym} Oversold! Opening LONG...")
+                            
+                            # 🟢 লজিক: মার্কেট নিচে নেমেছে (RSI < 35) + ঘুরে দাঁড়িয়েছে (Green Candle)
+                            if rsi < 35 and is_green:
+                                print(f"✅ {sym} Reversal Confirmed! Opening LONG...")
                                 # binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'BUY', 'type': 'MARKET', 'quantity': qty})
-                            # RSI ৬৫ এর উপরে গেলে SHORT (মার্কেট ওভারবট)
-                            elif rsi > 65:
-                                print(f"🧠 {sym} Overbought! Opening SHORT...")
+                                
+                            # 🔴 লজিক: মার্কেট অনেক ওপরে (RSI > 65) + নিচে নামা শুরু করেছে (Red Candle)
+                            elif rsi > 65 and is_red:
+                                print(f"✅ {sym} Reversal Confirmed! Opening SHORT...")
                                 # binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL', 'type': 'MARKET', 'quantity': qty})
 
             global active_trades
@@ -107,7 +118,7 @@ def auto_trading_loop():
                 "free_usdt": round(free_bal, 2),
                 "orders": live_orders
             }
-            time.sleep(1) # ১ সেকেন্ডের সুপার ফাস্ট স্ক্যানিং!
+            time.sleep(1)
             
         except Exception as e:
             time.sleep(1)
