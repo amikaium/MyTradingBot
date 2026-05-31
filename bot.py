@@ -34,13 +34,12 @@ def get_live_price(symbol):
     try: return float(requests.get(f"{BASE_URL}/fapi/v1/ticker/price?symbol={symbol}").json()['price'])
     except: return 0.0
 
-# 🧠 অ্যাডভান্সড প্রাইস অ্যাকশন ও RSI অ্যালগরিদম (Reversal Strategy)
+# ⚡ ফাস্ট স্ক্যানিং অ্যালগরিদম (1m Timeframe)
 def get_market_trend(symbol):
     try:
-        # ১৫ মিনিটের ক্যান্ডেলস্টিক ডেটা নিবে (বেশি একুরেট)
-        klines = requests.get(f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval=15m&limit=15").json()
+        # ১ মিনিটের ক্যান্ডেলস্টিক ডেটা (খুব দ্রুত সিগন্যাল দেবে)
+        klines = requests.get(f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval=1m&limit=15").json()
         
-        # RSI ক্যালকুলেশন
         gains, losses = 0, 0
         for i in range(1, 14):
             change = float(klines[i][4]) - float(klines[i-1][4])
@@ -49,11 +48,10 @@ def get_market_trend(symbol):
         rs = gains / losses if losses > 0 else 100
         rsi = 100 - (100 / (1 + rs))
         
-        # রিভার্সাল কনফার্মেশন (শেষ ক্লোজ হওয়া ক্যান্ডেল কি সবুজ না লাল?)
         last_open = float(klines[13][1])
         last_close = float(klines[13][4])
-        is_green_candle = last_close > last_open # মার্কেট ঘুরে ওপরের দিকে উঠছে
-        is_red_candle = last_close < last_open # মার্কেট ঘুরে নিচের দিকে নামছে
+        is_green_candle = last_close > last_open 
+        is_red_candle = last_close < last_open 
         
         return rsi, is_green_candle, is_red_candle
     except: return 50, False, False
@@ -61,7 +59,7 @@ def get_market_trend(symbol):
 active_trades = {} 
 
 def auto_trading_loop():
-    print("🚀 Pro AI Reversal Engine Started...")
+    print("🚀 Fast Aggressive Engine Started...")
     while True:
         try:
             acc_info = binance_request('GET', '/fapi/v2/account')
@@ -91,10 +89,12 @@ def auto_trading_loop():
                             "net_profit": round(net_profit, 4)
                         })
                         
+                        # প্রফিট হিট হলে ক্লোজ করবে (আসল ট্রেড)
                         if net_profit >= TAKE_PROFIT_USDT:
-                            print(f"💰 {sym} প্রফিট হিট! ফি বাদে রিয়েল লাভ: {net_profit} USDT.")
-                            # binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL' if amt > 0 else 'BUY', 'type': 'MARKET', 'quantity': abs(amt)})
+                            print(f"💰 {sym} Profit Hit! Closing...")
+                            binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL' if amt > 0 else 'BUY', 'type': 'MARKET', 'quantity': abs(amt)})
                             
+                    # নতুন ট্রেড ধরার লজিক
                     elif free_bal > TRADE_AMOUNT_USDT:
                         rsi, is_green, is_red = get_market_trend(sym)
                         price = get_live_price(sym)
@@ -102,15 +102,15 @@ def auto_trading_loop():
                         if price > 0:
                             qty = round(TRADE_AMOUNT_USDT / price, 1)
                             
-                            # 🟢 লজিক: মার্কেট নিচে নেমেছে (RSI < 35) + ঘুরে দাঁড়িয়েছে (Green Candle)
-                            if rsi < 35 and is_green:
-                                print(f"✅ {sym} Reversal Confirmed! Opening LONG...")
-                                # binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'BUY', 'type': 'MARKET', 'quantity': qty})
+                            # ⚡ এগ্রেসিভ লজিক: RSI একটু নিচে নামলেই (45) এবং সবুজ ক্যান্ডেল হলেই LONG ধরবে
+                            if rsi < 45 and is_green:
+                                print(f"⚡ {sym} Fast LONG Signal...")
+                                binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'BUY', 'type': 'MARKET', 'quantity': qty})
                                 
-                            # 🔴 লজিক: মার্কেট অনেক ওপরে (RSI > 65) + নিচে নামা শুরু করেছে (Red Candle)
-                            elif rsi > 65 and is_red:
-                                print(f"✅ {sym} Reversal Confirmed! Opening SHORT...")
-                                # binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL', 'type': 'MARKET', 'quantity': qty})
+                            # ⚡ এগ্রেসিভ লজিক: RSI একটু উপরে উঠলেই (55) এবং লাল ক্যান্ডেল হলেই SHORT ধরবে
+                            elif rsi > 55 and is_red:
+                                print(f"⚡ {sym} Fast SHORT Signal...")
+                                binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL', 'type': 'MARKET', 'quantity': qty})
 
             global active_trades
             active_trades = {
