@@ -3,14 +3,37 @@ import requests
 import hmac
 import hashlib
 from urllib.parse import urlencode
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
 
-# আপনার Binance API Key এবং Secret Key
+# ---------------------------------------------------------
+# ১. ফেক ওয়েব সার্ভার (Render-কে খুশি করার জন্য!)
+# ---------------------------------------------------------
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot is running successfully 24/7!")
+
+def run_dummy_server():
+    port = int(os.environ.get('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
+
+# সার্ভারটি একটি আলাদা ব্যাকগ্রাউন্ড থ্রেডে চালু করে দেওয়া হলো
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
+# ---------------------------------------------------------
+# ২. আপনার অরিজিনাল বটের কোড 
+# ---------------------------------------------------------
 API_KEY = 'XAQj4j52q11U0cGBY1UTSta8SOAFAiBefCQeEpNVp0MqRgUElKkbqC87h1PFsbuc'
 API_SECRET = 'Fplq9Q5MlHZ6CID31zNhUWZICiA8mumyrqu1dmdshOCZmOJFtXuimVMf2R2xVJVn'
 BASE_URL = 'https://fapi.binance.com'
 SYMBOL = 'XRPUSDT'
 
-print("🚀 24/7 Smart Trading Bot Started on PythonAnywhere Server!\n")
+print("🚀 24/7 Smart Trading Bot Started on Render Server!\n")
 
 def get_live_price():
     try:
@@ -44,24 +67,17 @@ def check_balance():
 # কানেকশন টেস্ট
 is_connected = check_balance()
 
-# ইনফিনিট লুপ (যাতে বট কখনোই বন্ধ না হয়)
 if is_connected:
     print("✅ Binance Futures কানেকশন সফল! বট মার্কেট মনিটরিং শুরু করেছে...\n")
     while True:
         try:
             price = get_live_price()
             if price:
-                # বর্তমান সময় এবং প্রাইস প্রিন্ট করবে
                 current_time = time.strftime('%Y-%m-%d %H:%M:%S')
                 print(f"[{current_time}] 🟢 {SYMBOL} লাইভ প্রাইস: {price} USDT | স্ক্যানিং চলছে...")
-                
-                # (পরবর্তী ধাপে এখানে Sketchware থেকে সিগন্যাল রিসিভ করার কোড বসবে)
-                
-            # প্রতি ১০ সেকেন্ড পরপর মার্কেট চেক করবে
             time.sleep(10)
-            
         except Exception as e:
             print(f"❌ Error: {e}")
             time.sleep(10)
 else:
-    print("\n⚠️ বট থেমে গেছে। আইপি (IP) ঠিক করুন।")
+    print("\n⚠️ বট থেমে গেছে। বাইনান্সে গিয়ে Render-এর নতুন IP আপডেট করুন।")
