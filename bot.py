@@ -9,7 +9,7 @@ API_SECRET = 'Fplq9Q5MlHZ6CID31zNhUWZICiA8mumyrqu1dmdshOCZmOJFtXuimVMf2R2xVJVn'
 BASE_URL = 'https://fapi.binance.com'
 
 SYMBOLS = ['XRPUSDT', 'DOGEUSDT', 'TRXUSDT', 'ADAUSDT', 'MATICUSDT', 'LINKUSDT'] 
-TARGET_PROFIT = 0.10  # 💡 সব ফি কাটার পর একদম পকেটে ১০ সেন্ট ঢুকলে তবেই ক্লোজ করবে
+TARGET_PROFIT = 0.10  # ফি কাটার পর একদম পকেটে ১০ সেন্ট ঢুকলে তবেই ক্লোজ করবে
 STOP_LOSS_PCT = 0.008 # ০.৮% লস লিমিট
 
 app = Flask(__name__)
@@ -25,10 +25,30 @@ def binance_request(method, endpoint, params=None):
         return requests.post(url, headers=headers).json() if method == 'POST' else requests.get(url, headers=headers).json()
     except: return None
 
+# 🧠 মার্কেট এনালাইসিস ফাংশন (RSI + Price Action)
+def get_market_trend(symbol):
+    try:
+        klines = requests.get(f"{BASE_URL}/fapi/v1/klines?symbol={symbol}&interval=1m&limit=15").json()
+        gains, losses = 0, 0
+        for i in range(1, 14):
+            change = float(klines[i][4]) - float(klines[i-1][4])
+            if change > 0: gains += change
+            else: losses -= change
+        rs = gains / losses if losses > 0 else 100
+        rsi = 100 - (100 / (1 + rs))
+        
+        last_open = float(klines[13][1])
+        last_close = float(klines[13][4])
+        is_green_candle = last_close > last_open 
+        is_red_candle = last_close < last_open 
+        
+        return rsi, is_green_candle, is_red_candle
+    except: return 50, False, False
+
 active_trades = {}
 
 def auto_trading_loop():
-    print("🚀 Pro True Net-Profit Engine Started...")
+    print("🚀 Pro AI Analysis + Net-Profit Engine Started...")
     while True:
         try:
             acc = binance_request('GET', '/fapi/v2/account')
@@ -52,11 +72,11 @@ def auto_trading_loop():
                         gross_pnl = float(pos['unrealizedProfit'])
                         entry = float(pos['entryPrice'])
                         
-                        # 💡 বাইনান্সের ফি ক্যালকুলেশন (ওপেন 0.05% + ক্লোজ 0.05% = 0.1% মোট ফি)
+                        # 💡 বাইনান্সের ফি ক্যালকুলেশন
                         position_value = abs(amt) * entry
                         estimated_fee = position_value * 0.001 
                         
-                        # আসল লাভ (Net Profit = গ্রস প্রফিট - মোট ফি)
+                        # আসল লাভ (Net Profit)
                         net_pnl = gross_pnl - estimated_fee
                         side = "LONG" if amt > 0 else "SHORT"
                         
@@ -66,21 +86,28 @@ def auto_trading_loop():
                             "net_profit": round(net_pnl, 4)
                         })
                         
-                        # 💡 ফি কাটার পর যদি ১০ সেন্ট লাভ থাকে, তবেই ক্লোজ করবে
+                        # ১০ সেন্ট আসল লাভ হলে ক্লোজ
                         if net_pnl >= TARGET_PROFIT or net_pnl <= -(position_value * STOP_LOSS_PCT):
-                            print(f"⚡ {sym} Closing Trade! True Net PNL: {net_pnl}")
+                            print(f"⚡ {sym} Closing Trade! Net PNL: {net_pnl}")
                             close_side = 'SELL' if amt > 0 else 'BUY'
                             binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': close_side, 'type': 'MARKET', 'quantity': abs(amt)})
                 
-                # নতুন ট্রেড ধরার লজিক 
+                # 🧠 নতুন ট্রেড ধরার লজিক (মার্কেট এনালাইসিস করে)
                 if free_bal > 3.0:
                     try:
+                        rsi, is_green, is_red = get_market_trend(sym)
                         price = float(requests.get(f"{BASE_URL}/fapi/v1/ticker/price?symbol={sym}").json()['price'])
-                        # ব্যালেন্সের ৯০% ব্যবহার করে ২০x লেভারেজে ট্রেড ধরবে
                         qty = round((free_bal * 0.9 * 20) / price, 1) 
+                        
                         if qty > 0:
-                            binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'BUY', 'type': 'MARKET', 'quantity': qty})
-                            time.sleep(1) 
+                            # 🟢 RSI নিচে নামলে এবং সবুজ ক্যান্ডেল হলে LONG
+                            if rsi < 45 and is_green:
+                                binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'BUY', 'type': 'MARKET', 'quantity': qty})
+                                time.sleep(1) 
+                            # 🔴 RSI উপরে উঠলে এবং লাল ক্যান্ডেল হলে SHORT
+                            elif rsi > 55 and is_red:
+                                binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'SELL', 'type': 'MARKET', 'quantity': qty})
+                                time.sleep(1)
                     except: pass
             
             global active_trades
