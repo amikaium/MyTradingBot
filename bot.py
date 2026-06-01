@@ -8,10 +8,9 @@ API_KEY = 'XAQj4j52q11U0cGBY1UTSta8SOAFAiBefCQeEpNVp0MqRgUElKkbqC87h1PFsbuc'
 API_SECRET = 'Fplq9Q5MlHZ6CID31zNhUWZICiA8mumyrqu1dmdshOCZmOJFtXuimVMf2R2xVJVn'
 BASE_URL = 'https://fapi.binance.com'
 
-# বটের ট্রেডিং পেয়ার
 SYMBOLS = ['XRPUSDT', 'DOGEUSDT', 'TRXUSDT', 'ADAUSDT', 'MATICUSDT', 'LINKUSDT'] 
-TARGET_PROFIT = 0.10  # ১০ সেন্ট লাভ হলেই ক্লোজ করবে
-STOP_LOSS_PCT = 0.008 # ০.৮% লস হলে ব্যালেন্স বাঁচাতে ক্লোজ করবে
+TARGET_PROFIT = 0.10  # 💡 সব ফি কাটার পর একদম পকেটে ১০ সেন্ট ঢুকলে তবেই ক্লোজ করবে
+STOP_LOSS_PCT = 0.008 # ০.৮% লস লিমিট
 
 app = Flask(__name__)
 
@@ -29,7 +28,7 @@ def binance_request(method, endpoint, params=None):
 active_trades = {}
 
 def auto_trading_loop():
-    print("🚀 Pro 10-Cent Scalping Engine Started...")
+    print("🚀 Pro True Net-Profit Engine Started...")
     while True:
         try:
             acc = binance_request('GET', '/fapi/v2/account')
@@ -50,23 +49,30 @@ def auto_trading_loop():
                 for pos in positions:
                     if pos['symbol'] == sym and float(pos['positionAmt']) != 0:
                         amt = float(pos['positionAmt'])
-                        pnl = float(pos['unrealizedProfit'])
+                        gross_pnl = float(pos['unrealizedProfit'])
                         entry = float(pos['entryPrice'])
+                        
+                        # 💡 বাইনান্সের ফি ক্যালকুলেশন (ওপেন 0.05% + ক্লোজ 0.05% = 0.1% মোট ফি)
+                        position_value = abs(amt) * entry
+                        estimated_fee = position_value * 0.001 
+                        
+                        # আসল লাভ (Net Profit = গ্রস প্রফিট - মোট ফি)
+                        net_pnl = gross_pnl - estimated_fee
                         side = "LONG" if amt > 0 else "SHORT"
                         
                         live_orders.append({
                             "symbol": sym,
                             "side": side,
-                            "net_profit": round(pnl, 4)
+                            "net_profit": round(net_pnl, 4)
                         })
                         
-                        # ১০ সেন্ট লাভ বা নির্দিষ্ট লস হলে সাথে সাথে ক্লোজ
-                        if pnl >= TARGET_PROFIT or pnl <= -(abs(amt) * entry * STOP_LOSS_PCT):
-                            print(f"⚡ {sym} Closing Trade! PNL: {pnl}")
+                        # 💡 ফি কাটার পর যদি ১০ সেন্ট লাভ থাকে, তবেই ক্লোজ করবে
+                        if net_pnl >= TARGET_PROFIT or net_pnl <= -(position_value * STOP_LOSS_PCT):
+                            print(f"⚡ {sym} Closing Trade! True Net PNL: {net_pnl}")
                             close_side = 'SELL' if amt > 0 else 'BUY'
                             binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': close_side, 'type': 'MARKET', 'quantity': abs(amt)})
                 
-                # নতুন ট্রেড ধরার লজিক (ব্যালেন্সের ওপর ডিপেন্ড করে)
+                # নতুন ট্রেড ধরার লজিক 
                 if free_bal > 3.0:
                     try:
                         price = float(requests.get(f"{BASE_URL}/fapi/v1/ticker/price?symbol={sym}").json()['price'])
@@ -74,7 +80,7 @@ def auto_trading_loop():
                         qty = round((free_bal * 0.9 * 20) / price, 1) 
                         if qty > 0:
                             binance_request('POST', '/fapi/v1/order', {'symbol': sym, 'side': 'BUY', 'type': 'MARKET', 'quantity': qty})
-                            time.sleep(1) # একসাথে অনেকগুলো না ধরে একটা ধরার পর ওয়েট করবে
+                            time.sleep(1) 
                     except: pass
             
             global active_trades
@@ -83,7 +89,7 @@ def auto_trading_loop():
                 "free_usdt": round(free_bal, 2),
                 "orders": live_orders
             }
-            time.sleep(0.5) # সুপার ফাস্ট আপডেট
+            time.sleep(0.5) 
             
         except Exception as e:
             time.sleep(2)
